@@ -56,7 +56,7 @@ impl<V, E: Copy> AdjacencyList<V, E> {
             }));
         }
     }
-    fn dfs(&self, start: usize) -> Dfs {
+    pub fn dfs(&self, start: usize) -> Dfs {
         let mut visited = vec![false; self.vertices.len()];
         let stack = vec![];
         let current = start;
@@ -86,7 +86,7 @@ impl<V, E: Copy> AdjacencyList<V, E> {
             }));
         }
     }
-    fn bfs(&self, start: usize) -> Bfs {
+    pub fn bfs(&self, start: usize) -> Bfs {
         let mut visited = vec![false; self.vertices.len()];
         let queue = VecDeque::new();
         let current = start;
@@ -110,6 +110,33 @@ pub struct Bfs {
     current: Option<usize>,
 }
 
+trait Container<T> {
+    fn push(&mut self, values: impl IntoIterator<Item = T>);
+    fn pop(&mut self) -> Option<T>;
+}
+
+impl<T> Container<T> for Vec<T> {
+    fn push(&mut self, values: impl IntoIterator<Item = T>) {
+        self.extend(values);
+    }
+    fn pop(&mut self) -> Option<T> {
+        self.pop()
+    }
+}
+
+impl<T> Container<T> for VecDeque<T> {
+    fn push(&mut self, values: impl IntoIterator<Item = T>) {
+        self.extend(values);
+    }
+    fn pop(&mut self) -> Option<T> {
+        self.pop_front()
+    }
+}
+
+
+pub trait VertexSercher {
+
+}
 impl Dfs {
     pub fn next<V, E: Copy>(&mut self, graph: &AdjacencyList<V, E>) -> Option<usize> {
         self.current.map(|current| {
@@ -177,6 +204,13 @@ impl<V, E: Copy, const N: usize> From<[V; N]> for AdjacencyList<V, E> {
     }
 }
 
+mod algo {
+    use super::AdjacencyList;
+
+    pub fn dinic(mut graph: AdjacencyList<usize, u64>, s: usize, t: usize) {
+        
+    }
+}
 #[cfg(test)]
 mod test {
     #[allow(unused_imports)]
