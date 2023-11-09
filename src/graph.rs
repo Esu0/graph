@@ -1,45 +1,63 @@
-use std::{collections::VecDeque, vec};
+use std::{collections::VecDeque, vec, cmp::Reverse};
 
-pub struct AdjacencyList<V, E: Copy> {
+pub struct AdjacencyList<E: Copy> {
     edges: Vec<Vec<(usize, E)>>,
-    vertices: Vec<V>,
+    vertices: usize,
 }
 
-impl<V, E: Copy> AdjacencyList<V, E> {
+pub struct KeyAndData<K: Copy + Eq + Ord, D> {
+    pub key: K,
+    pub data: D,
+}
+
+impl<K: Copy + Eq + Ord, D> PartialEq for KeyAndData<K, D> {
+    fn eq(&self, other: &Self) -> bool {
+        self.key.eq(&other.key)
+    }
+}
+
+impl<K: Copy + Eq + Ord, D> Eq for KeyAndData<K, D> {}
+
+impl<K: Copy + Ord, D> PartialOrd for KeyAndData<K, D> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.key.partial_cmp(&other.key)
+    }
+}
+
+impl<K: Copy + Ord, D> std::cmp::Ord for KeyAndData<K, D> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.key.cmp(&other.key)
+    }
+}
+
+impl<E: Copy> AdjacencyList<E> {
     pub const fn new() -> Self {
         Self {
             edges: Vec::new(),
-            vertices: Vec::new(),
+            vertices: 0,
         }
     }
 
     pub fn reserved(vertices: usize) -> Self {
         Self {
             edges: Vec::with_capacity(vertices),
-            vertices: Vec::with_capacity(vertices),
+            vertices: 0,
         }
     }
 
-    pub fn add_edge(&mut self, from: usize, to: usize, weight: E)
-    where
-        V: Default,
-    {
-        self.vertices
-            .resize_with(from.max(to) + 1, Default::default);
-        self.edges.resize_with(from.max(to) + 1, Vec::new);
+    pub fn add_edge(&mut self, from: usize, to: usize, weight: E) {
+        self.vertices = self.vertices.max(from.max(to) + 1);
+        self.edges.resize_with(self.vertices, Vec::new);
         self.edges[from].push((to, weight));
     }
 
-    pub fn add_edge_undirected(&mut self, from: usize, to: usize, weight: E)
-    where
-        V: Default,
-    {
+    pub fn add_edge_undirected(&mut self, from: usize, to: usize, weight: E) {
         self.add_edge(from, to, weight);
         self.add_edge(to, from, weight);
     }
 
     fn dfs_print(&self, start: usize) {
-        let mut visited = vec![false; self.vertices.len()];
+        let mut visited = vec![false; self.vertices];
         let mut stack = vec![start];
         let mut loop_count = 0;
         visited[start] = true;
@@ -62,7 +80,7 @@ impl<V, E: Copy> AdjacencyList<V, E> {
         }
     }
     pub fn dfs(&self, start: usize) -> Dfs {
-        let mut visited = vec![false; self.vertices.len()];
+        let mut visited = vec![false; self.vertices];
         let stack = vec![];
         let current = start;
         visited[current] = true;
@@ -73,28 +91,31 @@ impl<V, E: Copy> AdjacencyList<V, E> {
         }
     }
 
-    pub fn dfs_label<L>(&self, start: usize, label: L, mut f: impl FnMut(&L, &E) -> Option<L>) {
+    pub fn dfs_label<L: Default>(
+        &self,
+        start: usize,
+        label: L,
+        mut f: impl FnMut(&L, &L, &E) -> (L, bool),
+    ) {
         let mut stack = vec![start];
-        let mut labels: Vec<Option<L>> = (0..self.vertices.len()).map(|_| None).collect();
-        labels[start] = Some(label);
+        let mut labels: Vec<L> = (0..self.edges.len()).map(|_| Default::default()).collect();
+        labels[start] = label;
         while let Some(current) = stack.pop() {
-            if let Some(_) = &mut labels[current] {
-                stack.extend(self.edges[current].iter().filter_map(|(to, edge)| {
-                    if let Some(_) = &labels[*to] {
-                        None
-                    } else {
-                        // safety: labels[i] can become None only if labels[i] is None.
-                        // So, labels[current] is Some
-                        labels[*to] =
-                            f(unsafe { labels[current].as_ref().unwrap_unchecked() }, edge);
-                        Some(*to)
-                    }
-                }))
-            }
+            println!("Visiting vertex {}", current);
+            stack.extend(self.edges[current].iter().filter_map(|(to, edge)| {
+                let (l, c) = f(&labels[current], &labels[*to], edge);
+                labels[*to] = l;
+                if c {
+                    Some(*to)
+                } else {
+                    None
+                }
+            }))
         }
     }
+
     fn bfs_print(&self, start: usize) {
-        let mut visited = vec![false; self.vertices.len()];
+        let mut visited = vec![false; self.vertices];
         let mut queue = VecDeque::from([start]);
         let mut loop_count = 0;
         while let Some(current) = queue.pop_front() {
@@ -114,8 +135,9 @@ impl<V, E: Copy> AdjacencyList<V, E> {
             }));
         }
     }
+
     pub fn bfs(&self, start: usize) -> Bfs {
-        let mut visited = vec![false; self.vertices.len()];
+        let mut visited = vec![false; self.vertices];
         let queue = VecDeque::new();
         let current = start;
         visited[current] = true;
@@ -127,6 +149,28 @@ impl<V, E: Copy> AdjacencyList<V, E> {
     }
 }
 
+impl AdjacencyList<u32> {
+    fn dijkstra(&self, start: usize) {
+        let mut distances = vec![std::u32::MAX; self.vertices];
+        let mut confirmed = vec![false; self.vertices];
+        let mut pqueue = std::collections::BinaryHeap::from([(Reverse(0u32), start)]);
+        distances[start] = 0;
+        confirmed[start] = true;
+        while let Some((Reverse(distance), current)) = pqueue.pop() {
+            confirmed[current] = true;
+            println!("Visiting vertex {}", current);
+            println!("distance: {distance}");
+            pqueue.extend(self.edges[current].iter().filter_map(|(to, edge)| {
+                if confirmed[*to] {
+                    None
+                } else {
+                    distances[*to] = distances[*to].min(distance + *edge);
+                    Some((Reverse(distances[*to]), *to))
+                }
+            }))
+        }
+    }
+}
 pub struct Dfs {
     visited: Vec<bool>,
     stack: Vec<usize>,
@@ -138,32 +182,77 @@ pub struct Bfs {
     current: Option<usize>,
 }
 
-trait Container<T> {
+pub trait Container<T> {
     fn push(&mut self, values: impl IntoIterator<Item = T>);
     fn pop(&mut self) -> Option<T>;
 }
 
-impl<T> Container<T> for Vec<T> {
+pub struct Stack<T>(Vec<T>);
+impl<T> Container<T> for Stack<T> {
     fn push(&mut self, values: impl IntoIterator<Item = T>) {
-        self.extend(values);
+        self.0.extend(values);
     }
     fn pop(&mut self) -> Option<T> {
-        self.pop()
+        self.0.pop()
     }
 }
 
-impl<T> Container<T> for VecDeque<T> {
+pub struct Queue<T>(VecDeque<T>);
+impl<T> Container<T> for Queue<T> {
     fn push(&mut self, values: impl IntoIterator<Item = T>) {
-        self.extend(values);
+        self.0.extend(values);
     }
     fn pop(&mut self) -> Option<T> {
-        self.pop_front()
+        self.0.pop_front()
     }
 }
 
-pub trait VertexSercher {}
+pub trait LabelUpdate<L, WE> {
+    fn adj_label(&mut self, label_current: &L, label_adj: &L, weight_edge: &WE) -> (L, bool);
+}
+
+pub struct VertexSearcher<L, C: Container<usize>, LU> {
+    labels: Vec<L>,
+    container: C,
+    current: Option<usize>,
+    label_updater: LU,
+}
+
+/// 隣接する頂点を検知済みとし、すでに検知済みの頂点はpushしない
+pub struct MarkVertex;
+
+impl<WE> LabelUpdate<bool, WE> for MarkVertex {
+    fn adj_label(&mut self, _: &bool, label_adj: &bool, _: &WE) -> (bool, bool) {
+        (true, !*label_adj)
+    }
+}
+
+impl<L, C: Container<usize>, LU> VertexSearcher<L, C, LU> {
+    pub fn next<WE: Copy>(&mut self, graph: &AdjacencyList<WE>) -> Option<usize>
+    where
+        LU: LabelUpdate<L, WE>,
+    {
+        self.current.map(|current| {
+            self.container
+                .push(graph.edges[current].iter().filter_map(|(to, we)| {
+                    let (l, c) =
+                        self.label_updater
+                            .adj_label(&self.labels[current], &self.labels[*to], we);
+                    self.labels[*to] = l;
+                    if c {
+                        Some(*to)
+                    } else {
+                        None
+                    }
+                }));
+            self.current = self.container.pop();
+            current
+        })
+    }
+}
+
 impl Dfs {
-    pub fn next<V, E: Copy>(&mut self, graph: &AdjacencyList<V, E>) -> Option<usize> {
+    pub fn next<E: Copy>(&mut self, graph: &AdjacencyList<E>) -> Option<usize> {
         self.current.map(|current| {
             self.stack
                 .extend(graph.edges[current].iter().filter_map(|(to, _)| {
@@ -181,7 +270,7 @@ impl Dfs {
 }
 
 impl Bfs {
-    pub fn next<V, E: Copy>(&mut self, graph: &AdjacencyList<V, E>) -> Option<usize> {
+    pub fn next<E: Copy>(&mut self, graph: &AdjacencyList<E>) -> Option<usize> {
         self.current.map(|current| {
             self.queue
                 .extend(graph.edges[current].iter().filter_map(|(to, _)| {
@@ -204,28 +293,9 @@ impl Bfs {
         })
     }
 }
-impl<V, E: Copy> From<Vec<V>> for AdjacencyList<V, E> {
-    fn from(vertices: Vec<V>) -> Self {
-        Self {
-            edges: vec![Vec::new(); vertices.len()],
-            vertices,
-        }
-    }
-}
-
-impl<V, E: Copy, const N: usize> From<[V; N]> for AdjacencyList<V, E> {
-    fn from(vertices: [V; N]) -> Self {
-        Self {
-            edges: vec![Vec::new(); N],
-            vertices: vertices.into(),
-        }
-    }
-}
 
 mod algo {
     use super::AdjacencyList;
-
-    pub fn dinic(mut graph: AdjacencyList<usize, u64>, s: usize, t: usize) {}
 }
 #[cfg(test)]
 mod test {
@@ -234,7 +304,7 @@ mod test {
 
     #[test]
     fn test_dfs() {
-        let mut graph: AdjacencyList<(), i32> = AdjacencyList::reserved(7);
+        let mut graph: AdjacencyList<i32> = AdjacencyList::reserved(7);
         graph.add_edge_undirected(0, 1, 1);
         graph.add_edge_undirected(0, 2, 1);
         graph.add_edge_undirected(1, 3, 1);
@@ -252,11 +322,13 @@ mod test {
 
         println!();
         graph.dfs_print(start);
+
+        graph.dfs_label(start, true, |_, l, _| (true, !*l));
     }
 
     #[test]
     fn test_bfs() {
-        let mut graph: AdjacencyList<(), i32> = AdjacencyList::reserved(7);
+        let mut graph: AdjacencyList<i32> = AdjacencyList::reserved(7);
         graph.add_edge_undirected(0, 1, 1);
         graph.add_edge_undirected(0, 2, 1);
         graph.add_edge_undirected(1, 3, 1);
@@ -269,5 +341,19 @@ mod test {
         while let Some(current) = bfs.next(&graph) {
             println!("Visiting vertex {}", current);
         }
+    }
+
+    #[test]
+    fn test_dijkstra() {
+        let mut graph: AdjacencyList<u32> = AdjacencyList::reserved(7);
+        graph.add_edge(0, 1, 2);
+        graph.add_edge(0, 2, 1);
+        graph.add_edge(1, 3, 3);
+        graph.add_edge(2, 3, 4);
+        graph.add_edge(3, 4, 1);
+        graph.add_edge(2, 6, 1);
+        graph.add_edge(4, 5, 3);
+        graph.add_edge(5, 6, 6);
+        graph.dijkstra(0);
     }
 }
