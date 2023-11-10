@@ -5,30 +5,30 @@ pub struct AdjacencyList<E: Copy> {
     vertices: usize,
 }
 
-pub struct KeyAndData<K: Copy + Eq + Ord, D> {
-    pub key: K,
-    pub data: D,
-}
+// pub struct KeyAndData<K: Copy + Eq + Ord, D> {
+//     pub key: K,
+//     pub data: D,
+// }
 
-impl<K: Copy + Eq + Ord, D> PartialEq for KeyAndData<K, D> {
-    fn eq(&self, other: &Self) -> bool {
-        self.key.eq(&other.key)
-    }
-}
+// impl<K: Copy + Eq + Ord, D> PartialEq for KeyAndData<K, D> {
+//     fn eq(&self, other: &Self) -> bool {
+//         self.key.eq(&other.key)
+//     }
+// }
 
-impl<K: Copy + Eq + Ord, D> Eq for KeyAndData<K, D> {}
+// impl<K: Copy + Eq + Ord, D> Eq for KeyAndData<K, D> {}
 
-impl<K: Copy + Ord, D> PartialOrd for KeyAndData<K, D> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.key.partial_cmp(&other.key)
-    }
-}
+// impl<K: Copy + Ord, D> PartialOrd for KeyAndData<K, D> {
+//     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+//         self.key.partial_cmp(&other.key)
+//     }
+// }
 
-impl<K: Copy + Ord, D> std::cmp::Ord for KeyAndData<K, D> {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.key.cmp(&other.key)
-    }
-}
+// impl<K: Copy + Ord, D> std::cmp::Ord for KeyAndData<K, D> {
+//     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+//         self.key.cmp(&other.key)
+//     }
+// }
 
 impl<E: Copy> AdjacencyList<E> {
     pub const fn new() -> Self {
