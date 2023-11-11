@@ -57,6 +57,10 @@ impl<K> Tree<K> {
         self.into()
     }
 
+    unsafe fn as_mut<'a>(self) -> Option<&'a mut Node<K>> {
+        self.option().map(|mut n| unsafe {n.as_mut()})
+    }
+
     fn splay(self) -> Self {
         while let Self::Root(r) = self {
             if unsafe {r.as_ref().is_root()} {
@@ -67,30 +71,47 @@ impl<K> Tree<K> {
         unimplemented!()
     }
 
-    fn zig(self) -> Self {
-        if let Self::Root(mut s) = self {
-            unsafe {
-                let mut p = s.as_ref().parent.option().unwrap();
-                if Self::Root(s) == p.as_ref().left {
-                    let r = s.as_ref().right;
-                    s.as_mut().right = Self::Root(p);
-                    if let Tree::Root(mut r) = r {
-                        r.as_mut().parent = Tree::Root(p);
-                    }
-                    p.as_mut().left = r;
-                } else if Self::Root(s) == p.as_ref().right {
-                    let l = s.as_ref().left;
-                    s.as_mut().left = Self::Root(p);
-                    if let Tree::Root(mut l) = l {
-                        l.as_mut().parent = Tree::Root(p);
-                    }
-                    p.as_mut().right = l;
+    fn zig(self) {
+        unsafe {
+            let mut s_ptr = self.option().unwrap();
+            let mut p_ptr = s_ptr.as_ref().parent.option().unwrap();
+            let gp = p_ptr.as_ref().parent;
+            debug_assert!(s_ptr != p_ptr && Self::Root(p_ptr) != gp && self != gp);
+            let s = s_ptr.as_mut();
+            let p = p_ptr.as_mut();
+            if let Some(gp) = gp.as_mut() {
+                if gp.left == self {
+                    gp.left = self;
+                } else if gp.right == self {
+                    gp.right = self;
                 }
-                s.as_mut().parent = p.as_ref().parent;
             }
-            self
-        } else {
-            Self::Null
+            if p.left == self {
+                let right = s.right;
+                debug_assert!(![Self::Root(p_ptr), self].contains(&right));
+
+                p.parent = self;
+                p.left = right;
+
+                s.parent = gp;
+                s.right = Self::Root(p_ptr);
+
+                if let Some(right) = right.as_mut() {
+                    right.parent = Self::Root(p_ptr);
+                }
+            } else if p.right == self {
+                let left = s.left;
+                debug_assert!(left != Self::Root(p_ptr) && left != self);
+                p.parent = self;
+                p.right = left;
+
+                s.parent = gp;
+                s.left = Self::Root(p_ptr);
+
+                if let Some(left) = left.as_mut() {
+                    left.parent = Self::Root(p_ptr);
+                }
+            }
         }
     }
 }
@@ -106,6 +127,15 @@ impl<K> Node<K> {
             }
         }
     }
+
+    fn new_ptr(key: K) -> NonNull<Self> {
+        Box::leak(Box::new(Self {
+            left: Tree::new(),
+            right: Tree::new(),
+            parent: Tree::new(),
+            key,
+        })).into()
+    }
 }
 impl<K> SplayTree<K> {
     pub const fn new() -> Self {
@@ -115,4 +145,15 @@ impl<K> SplayTree<K> {
     }
 
     
+}
+
+#[cfg(test)]
+mod test {
+    #[allow(unused_imports)]
+    use super::*;
+
+    #[test]
+    fn zig_step() {
+
+    }
 }
