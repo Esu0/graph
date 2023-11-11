@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, vec, cmp::Reverse};
+use std::{cmp::Reverse, collections::VecDeque, vec};
 
 pub struct AdjacencyList<E: Copy> {
     edges: Vec<Vec<(usize, E)>>,
