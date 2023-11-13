@@ -1,4 +1,4 @@
-use super::{NodePtr, Direction};
+use super::NodePtr;
 
 struct LinkCutTree<K> {
     root: Option<NodePtr<K>>,

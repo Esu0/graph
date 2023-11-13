@@ -46,6 +46,7 @@ struct Node<K> {
     right: Option<NodePtr<K>>,
     parent: Option<NodePtr<K>>,
     key: K,
+    rev: bool,
 }
 
 #[derive(Eq)]
@@ -195,6 +196,7 @@ impl<K> Node<K> {
             right: None,
             parent: None,
             key,
+            rev: false,
         }))
         .into()
     }
@@ -317,14 +319,102 @@ impl<K> Node<K> {
         left: Option<NodePtr<K>>,
         right: Option<NodePtr<K>>,
         parent: Option<NodePtr<K>>,
+        rev: bool,
     ) -> NonNull<Self> {
         Box::leak(Box::new(Self {
             left,
             right,
             parent,
             key,
+            rev,
         }))
         .into()
+    }
+
+    /// # Safety
+    /// * 基本的に木に含まれるノードの参照は存在してはいけないが、
+    /// 自身の孫以下の参照は存在してもOK
+    fn splay(&mut self) {
+        let s_ptr = NodePtr::from(&*self);
+        loop {
+            let Some(p_ptr) = self.parent else {
+                break;
+            };
+            let p = p_ptr.as_mut();
+            if let Some(d1) = p.which(s_ptr) {
+                let Some(gp_ptr) = p.parent else {
+                    // zig action
+                    p.link_child_tree(self.child(d1.opposite()), d1);
+                    self.link_child(p, d1.opposite());
+                    self.parent = None;
+                    break;
+                };
+                let gp = gp_ptr.as_mut();
+                if let Some(d2) = gp.which(p_ptr) {
+                    if let Some(ggp_ptr) = gp.parent {
+                        ggp_ptr.as_mut().cas_child(gp_ptr, s_ptr);
+                    }
+                    self.parent = gp.parent;
+                    if d1 == d2 {
+                        // zig-zig action
+                        gp.link_child_tree(p.child(d1.opposite()), d1);
+                        p.link_child_tree(self.child(d1.opposite()), d1);
+                        p.link_child(gp, d1.opposite());
+                        self.link_child(p, d1.opposite());
+                    } else {
+                        // zig-zag action
+                        gp.link_child_tree(self.child(d1), d2);
+                        p.link_child_tree(self.child(d2), d1);
+                        self.link_child(gp, d1);
+                        self.link_child(p, d2);
+                    }
+                } else {
+                    // zig action
+                    p.link_child_tree(self.child(d1.opposite()), d1);
+                    self.parent = p.parent;
+                    self.link_child(p, d1.opposite());
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn expose(&mut self) {
+        self.splay();
+        self.right = None;
+        {
+            let mut p = NodePtr::from(&*self);
+
+            while let Some(c_ptr) = p.as_ref().parent {
+                let c = c_ptr.as_mut();
+                c.splay();
+                c.right = Some(p);
+                p = c_ptr;
+            }
+        }
+        self.splay();
+    }
+
+    /// # Safety
+    /// * 木に含まれるノードの参照が存在しない
+    /// * 自身の左の子ノードが存在する
+    fn cut(&mut self) {
+        self.expose();
+        let l = unsafe {
+            let l = self.left.take();
+            debug_assert!(l.is_some());
+            l.unwrap_unchecked()
+        };
+        l.as_mut().parent = None;
+    }
+
+    fn link(&mut self, parent: &mut Self) {
+        self.expose();
+        parent.expose();
+        self.parent = Some(parent.into());
+        parent.right = Some(self.into());
     }
 }
 
@@ -371,8 +461,9 @@ impl<K> NodePtr<K> {
         left: Option<NodePtr<K>>,
         right: Option<NodePtr<K>>,
         parent: Option<NodePtr<K>>,
+        rev: bool,
     ) -> Self {
-        Self(Node::from_raw_parts(key, left, right, parent))
+        Self(Node::from_raw_parts(key, left, right, parent, rev))
     }
 
     fn insert(self, key: K, dir: Direction, child_dir: Direction) -> Self {
@@ -445,51 +536,11 @@ impl<K> NodePtr<K> {
         p.link_child(gp, dir.opposite());
     }
 
+    /// # Safety
+    /// * 基本的に木に含まれるノードの参照は存在してはいけないが、
+    /// 自身の孫以下の参照は存在してもOK
     fn splay(self) {
-        loop {
-            let s = self.as_mut();
-            let Some(p_ptr) = s.parent else {
-                break;
-            };
-            let p = p_ptr.as_mut();
-            if let Some(d1) = p.which(self) {
-                let Some(gp_ptr) = p.parent else {
-                    // zig action
-                    p.link_child_tree(s.child(d1.opposite()), d1);
-                    s.link_child(p, d1.opposite());
-                    s.parent = None;
-                    break;
-                };
-                let gp = gp_ptr.as_mut();
-                if let Some(d2) = gp.which(p_ptr) {
-                    if let Some(ggp_ptr) = gp.parent {
-                        ggp_ptr.as_mut().cas_child(gp_ptr, self);
-                    }
-                    s.parent = gp.parent;
-                    if d1 == d2 {
-                        // zig-zig action
-                        gp.link_child_tree(p.child(d1.opposite()), d1);
-                        p.link_child_tree(s.child(d1.opposite()), d1);
-                        p.link_child(gp, d1.opposite());
-                        s.link_child(p, d1.opposite());
-                    } else {
-                        // zig-zag action
-                        gp.link_child_tree(s.child(d1), d2);
-                        p.link_child_tree(s.child(d2), d1);
-                        s.link_child(gp, d1);
-                        s.link_child(p, d2);
-                    }
-                } else {
-                    // zig action
-                    p.link_child_tree(s.child(d1.opposite()), d1);
-                    s.parent = p.parent;
-                    s.link_child(p, d1.opposite());
-                    break;
-                }
-            } else {
-                break;
-            }
-        }
+        self.as_mut().splay();
     }
 
     fn tree(self) -> Tree<K> {
@@ -499,6 +550,21 @@ impl<K> NodePtr<K> {
     fn drop_node(self) {
         unsafe { drop(Box::from_raw(self.0.as_ptr())) }
     }
+
+    // fn expose(self) {
+    //     self.splay();
+    //     self.as_mut().right = None;
+    //     {
+    //         let mut p = self;
+
+    //         while let Some(c) = p.as_ref().parent {
+    //             c.splay();
+    //             c.as_mut().right = Some(p);
+    //             p = c;
+    //         }
+    //     }
+    //     self.splay();
+    // }
 }
 
 impl<K> From<NodePtr<K>> for Tree<K> {
