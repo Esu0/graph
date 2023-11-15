@@ -6,18 +6,15 @@ use std::{
     ptr::NonNull,
 };
 
-pub struct SplayTree<K> {
-    root: Tree<K>,
-}
 
 #[derive(Eq)]
-enum Tree<K> {
+enum Tree<K, Op> {
     Null,
-    Root(NonNull<Node<K>>),
+    Root(NonNull<Node<K, Op>>),
 }
 
-impl<K> From<Tree<K>> for Option<NodePtr<K>> {
-    fn from(value: Tree<K>) -> Self {
+impl<K, Op> From<Tree<K, Op>> for Option<NodePtr<K, Op>> {
+    fn from(value: Tree<K, Op>) -> Self {
         match value {
             Tree::Null => None,
             Tree::Root(n) => Some(NodePtr(n)),
@@ -25,7 +22,7 @@ impl<K> From<Tree<K>> for Option<NodePtr<K>> {
     }
 }
 
-impl<K: PartialEq> PartialEq for Tree<K> {
+impl<K: PartialEq, Op> PartialEq for Tree<K, Op> {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Tree::Null, Tree::Null) => true,
@@ -41,38 +38,41 @@ impl<K: PartialEq> PartialEq for Tree<K> {
 }
 
 #[derive(Clone, PartialEq, Eq)]
-struct Node<K> {
-    left: Option<NodePtr<K>>,
-    right: Option<NodePtr<K>>,
-    parent: Option<NodePtr<K>>,
+struct Node<K, Op> {
+    left: Option<NodePtr<K, Op>>,
+    right: Option<NodePtr<K, Op>>,
+    parent: Option<NodePtr<K, Op>>,
     key: K,
+    sum: K,
+    op: Op,
+    size: usize,
     /// 左の子と右の子が反転されているか
     rev: bool,
 }
 
 #[derive(Eq)]
-pub struct NodePtr<K>(NonNull<Node<K>>);
+pub struct NodePtr<K, Op>(NonNull<Node<K, Op>>);
 
-impl<K> PartialEq for NodePtr<K> {
+impl<K, Op> PartialEq for NodePtr<K, Op> {
     fn eq(&self, other: &Self) -> bool {
         self.0 == other.0
     }
 }
 
-impl<K> Clone for NodePtr<K> {
+impl<K, Op> Clone for NodePtr<K, Op> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<K> Copy for NodePtr<K> {}
+impl<K, Op> Copy for NodePtr<K, Op> {}
 
-impl<K> Tree<K> {
+impl<K, Op> Tree<K, Op> {
     const fn new() -> Self {
         Self::Null
     }
 
-    fn option(&self) -> Option<NodePtr<K>> {
+    fn option(&self) -> Option<NodePtr<K, Op>> {
         self.clone_shallow().into()
     }
 
@@ -83,19 +83,19 @@ impl<K> Tree<K> {
         }
     }
 
-    fn from_option(option: Option<NodePtr<K>>) -> Self {
+    fn from_option(option: Option<NodePtr<K, Op>>) -> Self {
         match option {
             Some(n) => Tree::Root(n.0),
             None => Tree::Null,
         }
     }
 
-    fn search_dfs(&self, key: &K) -> Option<NodePtr<K>>
+    fn search_dfs(&self, key: &K) -> Option<NodePtr<K, Op>>
     where
         K: Eq,
     {
         if let Some(root) = self.option() {
-            let mut stack: Vec<NodePtr<K>> = vec![root];
+            let mut stack: Vec<NodePtr<K, Op>> = vec![root];
             while let Some(n_ptr) = stack.pop() {
                 let mut n = n_ptr.as_ref();
                 if &n.key == key {
@@ -122,7 +122,7 @@ impl<K> Tree<K> {
         }
     }
 
-    fn search_bfs(&self, key: &K) -> Option<NodePtr<K>>
+    fn search_bfs(&self, key: &K) -> Option<NodePtr<K, Op>>
     where
         K: Eq,
     {
@@ -181,7 +181,7 @@ impl<K> Tree<K> {
     }
 }
 
-impl<K> Node<K> {
+impl<K, Op> Node<K, Op> {
     /// # Safety
     /// `self`の親ノードへの可変参照が他に存在しない
     fn is_root(&self) -> bool {
@@ -191,12 +191,19 @@ impl<K> Node<K> {
         }
     }
 
-    fn new_ptr(key: K) -> NonNull<Self> {
+    fn new_ptr(key: K) -> NonNull<Self>
+    where
+        K: Clone,
+        Op: Default,
+    {
         Box::leak(Box::new(Self {
             left: None,
             right: None,
             parent: None,
+            sum: key.clone(),
             key,
+            op: Op::default(),
+            size: 1,
             rev: false,
         }))
         .into()
@@ -204,7 +211,7 @@ impl<K> Node<K> {
 
     /// # Safety
     /// `self.left != self.right || (self.left == None && self.right == None)`
-    fn which(&self, child: NodePtr<K>) -> Option<Direction> {
+    fn which(&self, child: NodePtr<K, Op>) -> Option<Direction> {
         if self.left == Some(child) {
             Some(Direction::Left)
         } else if self.right == Some(child) {
@@ -214,7 +221,7 @@ impl<K> Node<K> {
         }
     }
 
-    fn child(&self, dir: Direction) -> Option<NodePtr<K>> {
+    fn child(&self, dir: Direction) -> Option<NodePtr<K, Op>> {
         if let Direction::Left = dir {
             self.left
         } else {
@@ -222,14 +229,14 @@ impl<K> Node<K> {
         }
     }
 
-    fn replace_child(&mut self, dir: Direction, child: Option<NodePtr<K>>) -> Option<NodePtr<K>> {
+    fn replace_child(&mut self, dir: Direction, child: Option<NodePtr<K, Op>>) -> Option<NodePtr<K, Op>> {
         match dir {
             Direction::Left => std::mem::replace(&mut self.left, child),
             Direction::Right => std::mem::replace(&mut self.right, child),
         }
     }
 
-    fn child_mut(&mut self, dir: Direction) -> &mut Option<NodePtr<K>> {
+    fn child_mut(&mut self, dir: Direction) -> &mut Option<NodePtr<K, Op>> {
         match dir {
             Direction::Left => &mut self.left,
             Direction::Right => &mut self.right,
@@ -238,11 +245,15 @@ impl<K> Node<K> {
 
     /// # Safety
     /// `self`の左の子ノードへの参照が他に存在しない
-    pub fn insert_left(&mut self, key: K, child_dir: Direction) -> NodePtr<K> {
+    pub fn insert_left(&mut self, key: K, child_dir: Direction) -> NodePtr<K, Op>
+    where
+        K: Clone,
+        Op: Default,
+    {
         let l = self.left;
         let new_node = match child_dir {
-            Direction::Left => NodePtr::from_raw_parts(key, l, None, Some(self.into()), false),
-            Direction::Right => NodePtr::from_raw_parts(key, None, l, Some(self.into()), false),
+            Direction::Left => NodePtr::from_key_and_edges(key, l, None, Some(self.into())),
+            Direction::Right => NodePtr::from_key_and_edges(key, None, l, Some(self.into())),
         };
         self.left = Some(new_node);
         if let Some(l) = l.map(NodePtr::as_mut) {
@@ -253,11 +264,15 @@ impl<K> Node<K> {
 
     /// # Safety
     /// `self`の右の子ノードへの参照が他に存在しない
-    pub fn insert_right(&mut self, key: K, child_dir: Direction) -> NodePtr<K> {
+    pub fn insert_right(&mut self, key: K, child_dir: Direction) -> NodePtr<K, Op>
+    where
+        K: Clone,
+        Op: Default,
+    {
         let r = self.right;
         let new_node = match child_dir {
-            Direction::Left => NodePtr::from_raw_parts(key, r, None, Some(self.into()), false),
-            Direction::Right => NodePtr::from_raw_parts(key, None, r, Some(self.into()), false),
+            Direction::Left => NodePtr::from_key_and_edges(key, r, None, Some(self.into())),
+            Direction::Right => NodePtr::from_key_and_edges(key, None, r, Some(self.into())),
         };
         self.right = Some(new_node);
         if let Some(r) = r.map(NodePtr::as_mut) {
@@ -268,7 +283,11 @@ impl<K> Node<K> {
 
     /// # Safety
     /// `self`の`dir`の方向の子ノードへの参照が他に存在しない
-    pub fn insert(&mut self, key: K, dir: Direction, child_dir: Direction) -> NodePtr<K> {
+    pub fn insert(&mut self, key: K, dir: Direction, child_dir: Direction) -> NodePtr<K, Op>
+    where
+        K: Clone,
+        Op: Default,
+    {
         match dir {
             Direction::Left => self.insert_left(key, child_dir),
             Direction::Right => self.insert_right(key, child_dir),
@@ -285,7 +304,7 @@ impl<K> Node<K> {
     /// `child`が存在しない場合は、`self`の`dir`の方向の子ノードが存在しなくなる
     /// # Safety
     /// `child`が指すノードへの参照が他に存在しない
-    fn link_child_tree(&mut self, child: Option<NodePtr<K>>, dir: Direction) {
+    fn link_child_tree(&mut self, child: Option<NodePtr<K, Op>>, dir: Direction) {
         self.replace_child(dir, child);
         if let Some(child) = child.map(NodePtr::as_mut) {
             child.parent = Some(self.into());
@@ -294,7 +313,7 @@ impl<K> Node<K> {
 
     /// # Safety
     /// `self.left != self.right || (self.left == None && self.right == None)`
-    fn cas_child(&mut self, old: NodePtr<K>, new: NodePtr<K>) -> bool {
+    fn cas_child(&mut self, old: NodePtr<K, Op>, new: NodePtr<K, Op>) -> bool {
         if let Some(d) = self.which(old) {
             self.replace_child(d, Some(new));
             true
@@ -305,8 +324,8 @@ impl<K> Node<K> {
 
     fn cas_child_with(
         &mut self,
-        old: NodePtr<K>,
-        f: impl FnOnce(Direction) -> Option<NodePtr<K>>,
+        old: NodePtr<K, Op>,
+        f: impl FnOnce(Direction) -> Option<NodePtr<K, Op>>,
     ) -> bool {
         if let Some(d) = self.which(old) {
             self.replace_child(d, f(d));
@@ -317,9 +336,12 @@ impl<K> Node<K> {
     }
     fn from_raw_parts(
         key: K,
-        left: Option<NodePtr<K>>,
-        right: Option<NodePtr<K>>,
-        parent: Option<NodePtr<K>>,
+        sum: K,
+        op: Op,
+        size: usize,
+        left: Option<NodePtr<K, Op>>,
+        right: Option<NodePtr<K, Op>>,
+        parent: Option<NodePtr<K, Op>>,
         rev: bool,
     ) -> NonNull<Self> {
         Box::leak(Box::new(Self {
@@ -327,6 +349,9 @@ impl<K> Node<K> {
             right,
             parent,
             key,
+            sum,
+            op,
+            size,
             rev,
         }))
         .into()
@@ -439,73 +464,6 @@ impl<K> Node<K> {
             }
         }
     }
-
-    fn expose(&mut self) -> NodePtr<K> {
-        self.splay();
-        self.right = None;
-        let mut p = NodePtr::from(&*self);
-
-        while let Some(c_ptr) = p.as_ref().parent {
-            let c = c_ptr.as_mut();
-            c.splay();
-            c.right = Some(p);
-            c.update();
-            p = c_ptr;
-        }
-        self.splay();
-        return p;
-    }
-
-    /// # Safety
-    /// * 木に含まれるノードの参照が存在しない
-    /// * 自身の左の子ノードが存在する
-    fn cut(&mut self) {
-        self.expose();
-        let l = unsafe {
-            let l = self.left.take();
-            debug_assert!(l.is_some());
-            l.unwrap_unchecked()
-        };
-        l.as_mut().parent = None;
-    }
-
-    fn link(&mut self, parent: &mut Self) {
-        self.expose();
-        parent.expose();
-        self.parent = Some(parent.into());
-        parent.right = Some(self.into());
-    }
-
-    fn toggle(&mut self) {
-        self.rev = true;
-        std::mem::swap(&mut self.left, &mut self.right);
-    }
-
-    fn update(&mut self) {}
-
-    /// # Safety
-    /// * 自身の子ノードの参照が他に存在しない
-    fn push(&mut self) {
-        if self.rev {
-            self.rev = false;
-            if let Some(l) = self.left {
-                l.as_mut().toggle();
-            }
-            if let Some(r) = self.right {
-                r.as_mut().toggle();
-            }
-        }
-    }
-    fn evert(&mut self) {
-        self.expose();
-        std::mem::swap(&mut self.left, &mut self.right);
-        if let Some(l) = self.left {
-            l.as_mut().toggle();
-        }
-        if let Some(r) = self.right {
-            r.as_mut().toggle();
-        }
-    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -523,40 +481,59 @@ impl Direction {
     }
 }
 
-impl<'a, K> From<&'a mut Node<K>> for NodePtr<K> {
-    fn from(value: &'a mut Node<K>) -> Self {
+impl<'a, K, Op> From<&'a mut Node<K, Op>> for NodePtr<K, Op> {
+    fn from(value: &'a mut Node<K, Op>) -> Self {
         Self(NonNull::from(value))
     }
 }
 
-impl<'a, K> From<&'a Node<K>> for NodePtr<K> {
-    fn from(value: &'a Node<K>) -> Self {
+impl<'a, K, Op> From<&'a Node<K, Op>> for NodePtr<K, Op> {
+    fn from(value: &'a Node<K, Op>) -> Self {
         Self(NonNull::from(value))
     }
 }
 
-impl<K> From<Option<NodePtr<K>>> for Tree<K> {
-    fn from(value: Option<NodePtr<K>>) -> Self {
+impl<K, Op> From<Option<NodePtr<K, Op>>> for Tree<K, Op> {
+    fn from(value: Option<NodePtr<K, Op>>) -> Self {
         Self::from_option(value)
     }
 }
 
-impl<K> NodePtr<K> {
-    fn new(key: K) -> Self {
+impl<K, Op> NodePtr<K, Op> {
+    fn new(key: K) -> Self
+    where
+        K: Clone,
+        Op: Default,
+    {
         Self(Node::new_ptr(key))
+    }
+
+    fn from_key_and_edges(key: K, left: Option<NodePtr<K, Op>>, right: Option<NodePtr<K, Op>>, parent: Option<NodePtr<K, Op>>) -> Self
+    where
+        K: Clone,
+        Op: Default,
+    {
+        Self::from_raw_parts(key.clone(), key, Op::default(), 1, left, right, parent, false)
     }
 
     fn from_raw_parts(
         key: K,
-        left: Option<NodePtr<K>>,
-        right: Option<NodePtr<K>>,
-        parent: Option<NodePtr<K>>,
+        sum: K,
+        op: Op,
+        size: usize,
+        left: Option<NodePtr<K, Op>>,
+        right: Option<NodePtr<K, Op>>,
+        parent: Option<NodePtr<K, Op>>,
         rev: bool,
     ) -> Self {
-        Self(Node::from_raw_parts(key, left, right, parent, rev))
+        Self(Node::from_raw_parts(key, sum, op, size, left, right, parent, rev))
     }
 
-    fn insert(self, key: K, dir: Direction, child_dir: Direction) -> Self {
+    fn insert(self, key: K, dir: Direction, child_dir: Direction) -> Self
+    where
+        K: Clone,
+        Op: Default,
+    {
         self.as_mut().insert(key, dir, child_dir)
     }
 
@@ -564,11 +541,11 @@ impl<K> NodePtr<K> {
         self.as_ref().is_root()
     }
 
-    fn as_mut<'a>(mut self) -> &'a mut Node<K> {
+    fn as_mut<'a>(mut self) -> &'a mut Node<K, Op> {
         unsafe { self.0.as_mut() }
     }
 
-    fn as_ref<'a>(self) -> &'a Node<K> {
+    fn as_ref<'a>(self) -> &'a Node<K, Op> {
         unsafe { self.0.as_ref() }
     }
 
@@ -633,7 +610,7 @@ impl<K> NodePtr<K> {
         self.as_mut().splay();
     }
 
-    fn tree(self) -> Tree<K> {
+    fn tree(self) -> Tree<K, Op> {
         self.into()
     }
 
@@ -657,27 +634,22 @@ impl<K> NodePtr<K> {
     // }
 }
 
-impl<K> From<NodePtr<K>> for Tree<K> {
-    fn from(value: NodePtr<K>) -> Self {
+impl<K, Op> From<NodePtr<K, Op>> for Tree<K, Op> {
+    fn from(value: NodePtr<K, Op>) -> Self {
         Tree::Root(value.0)
     }
 }
 
-impl<K: Display> Display for Tree<K> {
+impl<K: Display, Op> Display for Tree<K, Op> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.fmt_rec(f, 0)
     }
 }
 
-impl<K: Debug> Debug for Tree<K> {
+impl<K: Debug, Op> Debug for Tree<K, Op> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.fmt_debug_rec(f)?;
         writeln!(f)
-    }
-}
-impl<K> SplayTree<K> {
-    pub const fn new() -> Self {
-        Self { root: Tree::new() }
     }
 }
 
@@ -687,7 +659,7 @@ enum TreeGenerator<K> {
     Null,
 }
 
-fn gen_tree<K>(struc: Vec<TreeGenerator<K>>) -> Option<NodePtr<K>> {
+fn gen_tree<K: Clone>(struc: Vec<TreeGenerator<K>>) -> Option<NodePtr<K, ()>> {
     let mut stack = vec![];
     for s in struc {
         match s {
@@ -697,7 +669,7 @@ fn gen_tree<K>(struc: Vec<TreeGenerator<K>>) -> Option<NodePtr<K>> {
             TreeGenerator::Parent(k) => {
                 let r = stack.pop().expect("invalid tree structure");
                 let l = stack.pop().expect("invalid tree structure");
-                let n = NodePtr::from_raw_parts(k, l, r, None, false);
+                let n = NodePtr::from_key_and_edges(k, l, r, None);
                 if let Some(l) = l {
                     l.as_mut().parent = Some(n);
                 }
@@ -758,9 +730,9 @@ pub mod bench {
     use super::*;
     use rand::Rng;
 
-    pub struct NodeList<K>(Vec<NodePtr<K>>);
+    pub struct NodeList<K, Op>(Vec<NodePtr<K, Op>>);
 
-    pub fn gen_tree(n: usize) -> NodeList<usize> {
+    pub fn gen_tree(n: usize) -> NodeList<usize, ()> {
         let mut v = vec![None; n];
         gen_tree_rec(NodePtr::new(1), n, 1, &mut v);
         NodeList(v.iter().filter_map(|x| *x).collect())
@@ -768,10 +740,10 @@ pub mod bench {
 
     // parent.key == k
     fn gen_tree_rec(
-        parent: NodePtr<usize>,
+        parent: NodePtr<usize, ()>,
         n: usize,
         k: usize,
-        v: &mut Vec<Option<NodePtr<usize>>>,
+        v: &mut Vec<Option<NodePtr<usize, ()>>>,
     ) {
         v[k - 1] = Some(parent);
         if k * 2 <= n {
@@ -792,24 +764,24 @@ pub mod bench {
         }
     }
 
-    pub fn bm_nop(v: &NodeList<usize>) {
+    pub fn bm_nop(v: &NodeList<usize, ()>) {
         let k = rand::thread_rng().gen_range(0..v.0.len());
         if !v.0[k].is_root() {}
     }
 
-    pub fn bm_zig(v: &NodeList<usize>) {
+    pub fn bm_zig(v: &NodeList<usize, ()>) {
         let k = rand::thread_rng().gen_range(0..v.0.len());
         if !v.0[k].is_root() {
             v.0[k].zig();
         }
     }
 
-    pub fn bm_splay(v: &NodeList<usize>) {
+    pub fn bm_splay(v: &NodeList<usize, ()>) {
         let k = rand::thread_rng().gen_range(0..v.0.len());
         v.0[k].splay();
     }
 
-    impl<K> Drop for NodeList<K> {
+    impl<K, Op> Drop for NodeList<K, Op> {
         fn drop(&mut self) {
             for n in self.0.iter() {
                 n.drop_node();
@@ -829,7 +801,7 @@ mod test {
 
     #[test]
     fn eq_tree() {
-        let node1 = NodePtr::new(0);
+        let node1: NodePtr<_, ()> = NodePtr::new(0);
         let node2 = NodePtr::new(0);
         assert_eq!(node1.tree(), node2.tree());
         node1.insert(1, Left, Left);
