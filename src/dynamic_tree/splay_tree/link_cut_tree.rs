@@ -10,18 +10,18 @@ struct LinkCutTree<K, Op, KeyAdd, Operate, OpAdd, RevOp> {
 
 impl<K: Clone, Op: Default + Eq, KeyAdd: Fn(&K, &K) -> K, Operate: Fn(&mut K, &Op, usize), OpAdd: Fn(&mut Op, &Op), RevOp: Fn(&mut K)> LinkCutTree<K, Op, KeyAdd, Operate, OpAdd, RevOp> {
     fn expose(&self, x: &mut Node<K, Op>) -> NodePtr<K, Op> {
-        x.splay();
+        self.splay(x);
         x.right = None;
         let mut p = NodePtr::from(&*x);
 
         while let Some(c_ptr) = p.as_ref().parent {
             let c = c_ptr.as_mut();
-            c.splay();
+            self.splay(x);
             c.right = Some(p);
             self.update(c);
             p = c_ptr;
         }
-        x.splay();
+        self.splay(x);
         return p;
     }
 
