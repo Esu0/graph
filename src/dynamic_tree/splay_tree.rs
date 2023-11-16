@@ -6,7 +6,6 @@ use std::{
     ptr::NonNull,
 };
 
-
 #[derive(Eq)]
 enum Tree<K, Op> {
     Null,
@@ -229,7 +228,11 @@ impl<K, Op> Node<K, Op> {
         }
     }
 
-    fn replace_child(&mut self, dir: Direction, child: Option<NodePtr<K, Op>>) -> Option<NodePtr<K, Op>> {
+    fn replace_child(
+        &mut self,
+        dir: Direction,
+        child: Option<NodePtr<K, Op>>,
+    ) -> Option<NodePtr<K, Op>> {
         match dir {
             Direction::Left => std::mem::replace(&mut self.left, child),
             Direction::Right => std::mem::replace(&mut self.right, child),
@@ -366,12 +369,13 @@ impl<K, Op> Node<K, Op> {
         let Some(mut p) = self.parent.map(NodePtr::as_mut) else {
             return;
         };
+        let mut next_d = p.which(s_ptr);
 
         loop {
             // let p = p_ptr.as_mut();
             // p.push();
 
-            if let Some(d1) = p.which(s_ptr) {
+            if let Some(d1) = next_d {
                 let Some(gp_ptr) = p.parent else {
                     // zig action
                     p.link_child_tree(self.child(d1.opposite()), d1);
@@ -402,8 +406,6 @@ impl<K, Op> Node<K, Op> {
                             // p.update();
                             self.link_child(p, d1.opposite());
 
-                            // 次のループにおけるselfの親を設定しておく
-                            p = ggp_ptr.as_mut();
                             // pのライフタイムが終了、同様の理由でupdateは安全
                             // self.update();
                         } else {
@@ -414,12 +416,13 @@ impl<K, Op> Node<K, Op> {
                             // p.update();
                             self.link_child(gp, d1);
                             self.link_child(p, d2);
-                            p = ggp_ptr.as_mut();
                             // self.update();
                         }
 
-                        p.cas_child(gp_ptr, s_ptr);
-                        self.parent = Some(ggp_ptr);
+                        p = ggp_ptr.as_mut();
+                        next_d = p.which(gp_ptr);
+                        // p.cas_child(gp_ptr, s_ptr);
+                        // self.parent = Some(ggp_ptr);
                     } else {
                         self.parent = None;
 
@@ -460,6 +463,7 @@ impl<K, Op> Node<K, Op> {
                     break;
                 }
             } else {
+                self.parent = Some(p.into());
                 break;
             }
         }
@@ -508,12 +512,26 @@ impl<K, Op> NodePtr<K, Op> {
         Self(Node::new_ptr(key))
     }
 
-    fn from_key_and_edges(key: K, left: Option<NodePtr<K, Op>>, right: Option<NodePtr<K, Op>>, parent: Option<NodePtr<K, Op>>) -> Self
+    fn from_key_and_edges(
+        key: K,
+        left: Option<NodePtr<K, Op>>,
+        right: Option<NodePtr<K, Op>>,
+        parent: Option<NodePtr<K, Op>>,
+    ) -> Self
     where
         K: Clone,
         Op: Default,
     {
-        Self::from_raw_parts(key.clone(), key, Op::default(), 1, left, right, parent, false)
+        Self::from_raw_parts(
+            key.clone(),
+            key,
+            Op::default(),
+            1,
+            left,
+            right,
+            parent,
+            false,
+        )
     }
 
     fn from_raw_parts(
@@ -526,7 +544,9 @@ impl<K, Op> NodePtr<K, Op> {
         parent: Option<NodePtr<K, Op>>,
         rev: bool,
     ) -> Self {
-        Self(Node::from_raw_parts(key, sum, op, size, left, right, parent, rev))
+        Self(Node::from_raw_parts(
+            key, sum, op, size, left, right, parent, rev,
+        ))
     }
 
     fn insert(self, key: K, dir: Direction, child_dir: Direction) -> Self
@@ -786,6 +806,18 @@ pub mod bench {
             for n in self.0.iter() {
                 n.drop_node();
             }
+        }
+    }
+
+    #[cfg(test)]
+    mod test {
+        #[test]
+        fn splay_test2() {
+            let nodes = super::gen_tree(1023);
+            let n = nodes.0.last().unwrap();
+            // println!("{}", nodes.0[0].tree());
+            n.as_mut().splay();
+            println!("{}", n.tree());
         }
     }
 }

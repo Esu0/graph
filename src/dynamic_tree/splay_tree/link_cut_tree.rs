@@ -1,4 +1,4 @@
-use super::{NodePtr, Node};
+use super::{Node, NodePtr};
 
 struct LinkCutTree<K, Op, KeyAdd, Operate, OpAdd, RevOp> {
     root: Option<NodePtr<K, Op>>,
@@ -8,7 +8,15 @@ struct LinkCutTree<K, Op, KeyAdd, Operate, OpAdd, RevOp> {
     rev_op: RevOp,
 }
 
-impl<K: Clone, Op: Default + Eq, KeyAdd: Fn(&K, &K) -> K, Operate: Fn(&mut K, &Op, usize), OpAdd: Fn(&mut Op, &Op), RevOp: Fn(&mut K)> LinkCutTree<K, Op, KeyAdd, Operate, OpAdd, RevOp> {
+impl<
+        K: Clone,
+        Op: Default + Eq,
+        KeyAdd: Fn(&K, &K) -> K,
+        Operate: Fn(&mut K, &Op, usize),
+        OpAdd: Fn(&mut Op, &Op),
+        RevOp: Fn(&mut K),
+    > LinkCutTree<K, Op, KeyAdd, Operate, OpAdd, RevOp>
+{
     fn expose(&self, x: &mut Node<K, Op>) -> NodePtr<K, Op> {
         self.splay(x);
         x.right = None;
@@ -61,7 +69,7 @@ impl<K: Clone, Op: Default + Eq, KeyAdd: Fn(&K, &K) -> K, Operate: Fn(&mut K, &O
             self.toggle(r.as_mut());
         }
     }
-    
+
     fn link(&mut self, child: &mut Node<K, Op>, parent: &mut Node<K, Op>) {
         self.expose(child);
         self.expose(parent);
