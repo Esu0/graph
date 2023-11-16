@@ -33,6 +33,9 @@ impl<
         return p;
     }
 
+    /// 子が変わったタイミングで実行
+    /// # Safety
+    /// * 自身の子ノードの参照が他に存在しない
     fn update(&self, x: &mut Node<K, Op>) {
         x.sum = x.key.clone();
         x.size = 1;
@@ -59,6 +62,8 @@ impl<
         l.as_mut().parent = None;
     }
 
+    /// # Safety
+    /// * 自身の子ノードの参照が他に存在しない
     fn evert(&mut self, x: &mut Node<K, Op>) {
         self.expose(x);
         std::mem::swap(&mut x.left, &mut x.right);
@@ -78,6 +83,7 @@ impl<
     }
 
     fn toggle(&self, x: &mut Node<K, Op>) {
+        debug_assert!(!x.rev);
         x.rev = true;
         (self.rev_op)(&mut x.sum);
         std::mem::swap(&mut x.left, &mut x.right);
@@ -107,6 +113,41 @@ impl<
         }
     }
 
+    fn push_manual_child(&self, p: &mut Node<K, Op>, ch1: Option<&mut Node<K, Op>>, ch2: Option<&mut Node<K, Op>>) {
+        let def = Op::default();
+        match (ch1, ch2) {
+            (Some(c1), Some(c2)) => {
+                if p.op != def {
+                    self.propergate(c1, &p.op);
+                    self.propergate(c2, &p.op);
+                }
+                if p.rev {
+                    self.toggle(c1);
+                    self.toggle(c2);
+                }
+            },
+            (Some(c1), None) => {
+                if p.op != def {
+                    self.propergate(c1, &p.op);
+                }
+                if p.rev {
+                    self.toggle(c1);
+                }
+            },
+            (None, Some(c2)) => {
+                if p.op != def {
+                    self.propergate(c2, &p.op);
+                }
+                if p.rev {
+                    self.toggle(c2);
+                }
+            },
+            (None, None) => {},
+        }
+        p.op = def;
+        p.rev = false;
+    }
+
     fn propergate(&self, x: &mut Node<K, Op>, op: &Op) {
         (self.op_add)(&mut x.op, op);
         (self.operate)(&mut x.key, &x.op, 1);
@@ -122,13 +163,15 @@ impl<
         let Some(mut p) = x.parent.map(NodePtr::as_mut) else {
             return;
         };
+        let mut next_d = p.which(s_ptr);
 
         loop {
-            // let p = p_ptr.as_mut();
-            self.push(p);
 
-            if let Some(d1) = p.which(s_ptr) {
+            if let Some(d1) = next_d {
+                // self.push(p);
                 let Some(gp_ptr) = p.parent else {
+                    self.push_manual_child(p, Some(x), p.child(d1.opposite()).map(NodePtr::as_mut));
+                    self.push(x);
                     // zig action
                     p.link_child_tree(x.child(d1.opposite()), d1);
                     self.update(p);
@@ -139,9 +182,12 @@ impl<
                     break;
                 };
                 let gp = gp_ptr.as_mut();
-                self.push(gp);
+                // gp.push();
                 if let Some(d2) = gp.which(p.into()) {
                     if let Some(ggp_ptr) = gp.parent {
+                        self.push_manual_child(gp, Some(p), gp.child(d2.opposite()).map(NodePtr::as_mut));
+                        self.push_manual_child(p, Some(x), p.child(d1.opposite()).map(NodePtr::as_mut));
+                        self.push(x);
                         // xの次の親はggpであり、次のループでupdateされるので
                         // ggp.update();を実行する必要はない。
 
@@ -150,32 +196,34 @@ impl<
                             gp.link_child_tree(p.child(d1.opposite()), d1);
                             // 上の操作でgp <-> pのリンクが切れる。pのd1の反対方向の子ノードは
                             // xじゃない方の子ノードだから、gpの子ノードの参照は存在しない
-                            // gp.update();
+                            self.update(gp);
                             p.link_child_tree(x.child(d1.opposite()), d1);
                             p.link_child(gp, d1.opposite());
                             // 上の操作でp <-> xのリンクが切れる。ここでgpのライフタイムは終了し、
                             // pの子ノードの参照は存在しなくなる。
-                            // p.update();
+                            self.update(p);
                             x.link_child(p, d1.opposite());
 
-                            // 次のループにおけるxの親を設定しておく
-                            p = ggp_ptr.as_mut();
                             // pのライフタイムが終了、同様の理由でupdateは安全
+                            self.update(x);
                         } else {
                             // zig-zag action
                             gp.link_child_tree(x.child(d1), d2);
-                            // gp.update();
+                            self.update(gp);
                             p.link_child_tree(x.child(d2), d1);
-                            // p.update();
+                            self.update(p);
                             x.link_child(gp, d1);
                             x.link_child(p, d2);
-                            p = ggp_ptr.as_mut();
+                            self.update(x);
                         }
 
-                        self.update(x);
-                        p.cas_child(gp_ptr, s_ptr);
-                        x.parent = Some(ggp_ptr);
+                        p = ggp_ptr.as_mut();
+                        next_d = p.which(gp_ptr);
+                        // p.cas_child(gp_ptr, s_ptr);
+                        // x.parent = Some(ggp_ptr);
                     } else {
+                        self.push_manual_child(p, Some(x), p.child(d1.opposite()).map(NodePtr::as_mut));
+                        self.push(x);
                         x.parent = None;
 
                         if d1 == d2 {
@@ -183,29 +231,33 @@ impl<
                             gp.link_child_tree(p.child(d1.opposite()), d1);
                             // 上の操作でgp <-> pのリンクが切れる。pのd1の反対方向の子ノードは
                             // xじゃない方の子ノードだから、gpの子ノードの参照は存在しない
-                            // gp.update();
+                            self.update(gp);
                             p.link_child_tree(x.child(d1.opposite()), d1);
                             p.link_child(gp, d1.opposite());
                             // 上の操作でp <-> xのリンクが切れる。ここでgpのライフタイムは終了し、
                             // pの子ノードの参照は存在しなくなる。
-                            // p.update();
+                            self.update(p);
                             x.link_child(p, d1.opposite());
                             // drop(p);
                             // pのライフタイムが終了、同様の理由でupdateは安全
+                            self.update(x);
                         } else {
                             // zig-zag action
                             gp.link_child_tree(x.child(d1), d2);
-                            // gp.update();
+                            self.update(gp);
                             p.link_child_tree(x.child(d2), d1);
-                            // p.update();
+                            self.update(p);
                             x.link_child(gp, d1);
                             x.link_child(p, d2);
                             // drop(p);
+                            self.update(x);
                         }
-                        self.update(x);
+
                         break;
                     }
                 } else {
+                    self.push_manual_child(p, Some(x), p.child(d1.opposite()).map(NodePtr::as_mut));
+                    self.push(x);
                     // zig action
                     p.link_child_tree(x.child(d1.opposite()), d1);
                     self.update(p);
@@ -215,8 +267,19 @@ impl<
                     break;
                 }
             } else {
+                x.parent = Some(p.into());
                 break;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    #[allow(unused_imports)]
+    use super::*;
+
+    #[test]
+    fn splay_test3() {
     }
 }

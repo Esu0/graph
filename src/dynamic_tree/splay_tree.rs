@@ -458,8 +458,10 @@ impl<K, Op> Node<K, Op> {
                 } else {
                     // zig action
                     p.link_child_tree(self.child(d1.opposite()), d1);
+                    // self.update(p);
                     self.parent = p.parent;
                     self.link_child(p, d1.opposite());
+                    // self.update(x);
                     break;
                 }
             } else {
