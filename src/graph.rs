@@ -1,3 +1,4 @@
+pub mod traits;
 use std::{cmp::Reverse, collections::VecDeque, vec};
 
 pub struct AdjacencyList<E: Copy> {
