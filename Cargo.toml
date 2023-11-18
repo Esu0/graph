@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 criterion = {version = "0.5.1", features = ["html_reports"]}
 rand = "0.8.5"
+num-traits = "0.2.17"
 
 [[bench]]
 name = "benchmark"

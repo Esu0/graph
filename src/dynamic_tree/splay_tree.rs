@@ -178,6 +178,29 @@ impl<K, Op> Tree<K, Op> {
             write!(f, "null")
         }
     }
+
+    fn display_manual_rec<W: fmt::Write>(
+        &self,
+        f: &mut W,
+        level: usize,
+        disp: &mut impl FnMut(&mut W, &Node<K, Op>) -> fmt::Result,
+    ) -> fmt::Result {
+        if let Some(s) = self.option() {
+            Self::from_option(s.as_ref().left).display_manual_rec(f, level + 1, disp)?;
+            write!(f, "{}", "\t".repeat(level))?;
+            disp(f, s.as_ref())?;
+            writeln!(f)?;
+            Self::from_option(s.as_ref().right).display_manual_rec(f, level + 1, disp)?;
+        }
+        Ok(())
+    }
+
+    // Stringを使っているが、他にいい方法がありそう
+    fn display_manual(&self, mut disp: impl FnMut(&mut String, &Node<K, Op>) -> fmt::Result) {
+        let mut s = String::new();
+        self.display_manual_rec(&mut s, 0, &mut disp).unwrap();
+        print!("{}", s);
+    }
 }
 
 impl<K, Op> Node<K, Op> {

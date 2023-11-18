@@ -1,7 +1,9 @@
+use crate::graph::traits;
+
 use super::{Node, NodePtr};
 
 struct LinkCutTree<K, Op, KeyAdd, Operate, OpAdd, RevOp> {
-    root: Option<NodePtr<K, Op>>,
+    root: Vec<NodePtr<K, Op>>,
     key_add: KeyAdd,
     operate: Operate,
     op_add: OpAdd,
@@ -17,6 +19,80 @@ impl<
         RevOp: Fn(&mut K),
     > LinkCutTree<K, Op, KeyAdd, Operate, OpAdd, RevOp>
 {
+    pub fn new<Idx: Copy, T: crate::graph::traits::MarkedTree<Idx, K>>(
+        tree: &T,
+        key_add: KeyAdd,
+        operate: Operate,
+        op_add: OpAdd,
+        rev_op: RevOp,
+    ) -> Self {
+        let mut roots = vec![];
+        if let Some(root) = tree.root() {
+            let mut stack: Vec<(Option<NodePtr<K, Op>>, Idx)> = vec![(None, root)];
+            while let Some((p, idx)) = stack.pop() {
+                let node: NodePtr<_, Op> = NodePtr::new(tree.marker(idx).clone());
+                let mut nodes: [_; 64] = std::array::from_fn(|_| None);
+                let mut i: u32 = 1;
+                nodes[0] = Some(node.as_mut());
+                let mut children = tree.children(idx);
+                while let Some(child) = children.next() {
+                    stack.extend(std::iter::repeat(Some(node)).zip(children));
+                    let node_ptr =
+                        NodePtr::from_key_and_edges(tree.marker(child).clone(), None, None, None);
+
+                    let j = i.trailing_ones() as usize;
+                    let node = node.as_mut();
+                    if let Some(child) = nodes.get_mut(j.wrapping_sub(1)).map(|x| x.take().unwrap())
+                    {
+                        node.left = Some(child.into());
+                        child.parent = Some(node_ptr);
+                        debug_assert!(node.right.is_none());
+                        // 修正箇所: nodes[0]がsomeかどうかは確定しない
+                        let mut before = &*nodes[0].take().unwrap();
+                        nodes[1..j.wrapping_sub(1)].iter_mut().for_each(|n| {
+                            let n = n.take().unwrap();
+                            n.sum = key_add(&n.sum, &before.sum);
+                            n.size += before.size;
+                            before = n;
+                        });
+                        child.sum = key_add(&child.sum, &before.sum);
+                        child.size += before.size;
+                        node.sum = key_add(&child.sum, &node.key);
+                        node.size = child.size + 1;
+                    } else {
+                        node.sum = node.key.clone();
+                    }
+                    if let Some(Some(parent)) = nodes.get_mut(j + 1) {
+                        parent.right = Some(node_ptr);
+                        node.parent = Some((*parent).into());
+                    }
+                    nodes[j] = Some(node);
+
+                    children = tree.children(child);
+                    i += 1;
+                }
+                let mut itr = nodes.iter_mut().filter_map(|x| x.take());
+                if let Some(mut root) = itr.next() {
+                    itr.for_each(|x| {
+                        x.right = Some(root.into());
+                        x.sum = key_add(&x.sum, &root.sum);
+                        x.size += root.size;
+                        root = x;
+                    });
+                    root.parent = p;
+                    roots.push(root.into());
+                }
+            }
+        }
+        Self {
+            root: roots,
+            key_add,
+            operate,
+            op_add,
+            rev_op,
+        }
+    }
+
     fn expose(&self, x: &mut Node<K, Op>) -> NodePtr<K, Op> {
         self.splay(x);
         x.right = None;
@@ -113,7 +189,12 @@ impl<
         }
     }
 
-    fn push_manual_child(&self, p: &mut Node<K, Op>, ch1: Option<&mut Node<K, Op>>, ch2: Option<&mut Node<K, Op>>) {
+    fn push_manual_child(
+        &self,
+        p: &mut Node<K, Op>,
+        ch1: Option<&mut Node<K, Op>>,
+        ch2: Option<&mut Node<K, Op>>,
+    ) {
         let def = Op::default();
         match (ch1, ch2) {
             (Some(c1), Some(c2)) => {
@@ -125,7 +206,7 @@ impl<
                     self.toggle(c1);
                     self.toggle(c2);
                 }
-            },
+            }
             (Some(c1), None) => {
                 if p.op != def {
                     self.propergate(c1, &p.op);
@@ -133,7 +214,7 @@ impl<
                 if p.rev {
                     self.toggle(c1);
                 }
-            },
+            }
             (None, Some(c2)) => {
                 if p.op != def {
                     self.propergate(c2, &p.op);
@@ -141,8 +222,8 @@ impl<
                 if p.rev {
                     self.toggle(c2);
                 }
-            },
-            (None, None) => {},
+            }
+            (None, None) => {}
         }
         p.op = def;
         p.rev = false;
@@ -166,7 +247,6 @@ impl<
         let mut next_d = p.which(s_ptr);
 
         loop {
-
             if let Some(d1) = next_d {
                 // self.push(p);
                 let Some(gp_ptr) = p.parent else {
@@ -185,8 +265,16 @@ impl<
                 // gp.push();
                 if let Some(d2) = gp.which(p.into()) {
                     if let Some(ggp_ptr) = gp.parent {
-                        self.push_manual_child(gp, Some(p), gp.child(d2.opposite()).map(NodePtr::as_mut));
-                        self.push_manual_child(p, Some(x), p.child(d1.opposite()).map(NodePtr::as_mut));
+                        self.push_manual_child(
+                            gp,
+                            Some(p),
+                            gp.child(d2.opposite()).map(NodePtr::as_mut),
+                        );
+                        self.push_manual_child(
+                            p,
+                            Some(x),
+                            p.child(d1.opposite()).map(NodePtr::as_mut),
+                        );
                         self.push(x);
                         // xの次の親はggpであり、次のループでupdateされるので
                         // ggp.update();を実行する必要はない。
@@ -222,7 +310,11 @@ impl<
                         // p.cas_child(gp_ptr, s_ptr);
                         // x.parent = Some(ggp_ptr);
                     } else {
-                        self.push_manual_child(p, Some(x), p.child(d1.opposite()).map(NodePtr::as_mut));
+                        self.push_manual_child(
+                            p,
+                            Some(x),
+                            p.child(d1.opposite()).map(NodePtr::as_mut),
+                        );
                         self.push(x);
                         x.parent = None;
 
@@ -274,12 +366,65 @@ impl<
     }
 }
 
+struct IndexedTree<T> {
+    nodes: Vec<T>,
+    childs: Vec<Vec<usize>>,
+}
+
+impl<T> traits::Tree<usize> for IndexedTree<T> {
+    fn root(&self) -> Option<usize> {
+        Some(0)
+    }
+
+    fn children(&self, n: usize) -> impl Iterator<Item = usize> {
+        self.childs
+            .get(n)
+            .map(|x| x.iter().copied())
+            .unwrap_or_default()
+    }
+}
+
+impl<T> traits::Graph<usize> for IndexedTree<T> {
+    fn adjacency(&self, v: usize) -> impl Iterator<Item = usize> {
+        <Self as traits::Tree<_>>::children(self, v)
+    }
+}
+
+impl<T> traits::MarkedGraph<usize, T> for IndexedTree<T> {
+    fn marker(&self, v: usize) -> &T {
+        &self.nodes[v]
+    }
+
+    fn marker_mut(&mut self, v: usize) -> &mut T {
+        &mut self.nodes[v]
+    }
+}
+
+impl<T> traits::MarkedTree<usize, T> for IndexedTree<T> {}
+
 #[cfg(test)]
 mod test {
+    use std::vec;
+
     #[allow(unused_imports)]
     use super::*;
+    use std::fmt::Write;
 
     #[test]
-    fn splay_test3() {
+    fn link_cut_tree_build() {
+        let tree = IndexedTree {
+            nodes: vec![0, 1, 2, 3, 4, 5, 6, 7],
+            childs: vec![vec![1, 2], vec![3, 4], vec![5, 6]],
+        };
+        let lct = LinkCutTree::new(
+            &tree,
+            |x, y| x + y,
+            |x, y: &i32, z| *x += z as i32 * *y,
+            |x, y| *x += *y,
+            |_| {},
+        );
+        for root in lct.root {
+            root.tree().display_manual(|s, n| write!(s, "{}", n.sum));
+        }
     }
 }
