@@ -172,6 +172,37 @@ impl AdjacencyList<u32> {
         }
     }
 }
+
+mod algorithm {
+    use std::collections::VecDeque;
+
+    use super::AdjacencyList;
+
+    pub fn max_flow<W: num_traits::Unsigned + Copy>(graph: &AdjacencyList<W>, s: usize, t: usize) {
+        let mut visited = vec![false; graph.vertices];
+        let mut label = vec![0u32; graph.vertices];
+        let mut queue = VecDeque::from([s]);
+        visited[s] = true;
+        while let Some(current) = queue.pop_front() {
+            queue.extend(graph.edges[current].iter().filter_map(|(to, _)| {
+                if visited[*to] {
+                    None
+                } else {
+                    visited[*to] = true;
+                    label[*to] = label[current] + 1;
+                    Some(*to)
+                }
+            }));
+        }
+
+        let mut current_edge = graph.edges[..t]
+            .iter()
+            .map(|v| v.get(0).map(|(to, _)| *to))
+            .chain(graph.edges[(t + 1)..].iter().map(|v| v.get(0).map(|(to, _)| *to)));
+
+        unimplemented!()
+    }
+}
 pub struct Dfs {
     visited: Vec<bool>,
     stack: Vec<usize>,

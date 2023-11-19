@@ -30,33 +30,34 @@ impl<
         if let Some(root) = tree.root() {
             let mut stack: Vec<(Option<NodePtr<K, Op>>, Idx)> = vec![(None, root)];
             while let Some((p, idx)) = stack.pop() {
-                let node: NodePtr<_, Op> = NodePtr::new(tree.marker(idx).clone());
+                let mut prev: NodePtr<_, Op> = NodePtr::new(tree.marker(idx).clone());
                 let mut nodes: [_; 64] = std::array::from_fn(|_| None);
                 let mut i: u32 = 1;
-                nodes[0] = Some(node.as_mut());
+                nodes[0] = Some(prev.as_mut());
                 let mut children = tree.children(idx);
                 while let Some(child) = children.next() {
-                    stack.extend(std::iter::repeat(Some(node)).zip(children));
+                    stack.extend(std::iter::repeat(Some(prev)).zip(children));
                     let node_ptr =
                         NodePtr::from_key_and_edges(tree.marker(child).clone(), None, None, None);
 
                     let j = i.trailing_ones() as usize;
-                    let node = node.as_mut();
+                    let node = node_ptr.as_mut();
                     if let Some(child) = nodes.get_mut(j.wrapping_sub(1)).map(|x| x.take().unwrap())
                     {
                         node.left = Some(child.into());
                         child.parent = Some(node_ptr);
                         debug_assert!(node.right.is_none());
-                        // 修正箇所: nodes[0]がsomeかどうかは確定しない
-                        let mut before = &*nodes[0].take().unwrap();
-                        nodes[1..j.wrapping_sub(1)].iter_mut().for_each(|n| {
-                            let n = n.take().unwrap();
-                            n.sum = key_add(&n.sum, &before.sum);
-                            n.size += before.size;
-                            before = n;
-                        });
-                        child.sum = key_add(&child.sum, &before.sum);
-                        child.size += before.size;
+
+                        if let Some(mut before) = nodes[0].take().map(|x| &*x) {
+                            nodes[1..j.wrapping_sub(1)].iter_mut().for_each(|n| {
+                                let n = n.take().unwrap();
+                                n.sum = key_add(&n.sum, &before.sum);
+                                n.size += before.size;
+                                before = n;
+                            });
+                            child.sum = key_add(&child.sum, &before.sum);
+                            child.size += before.size;
+                        }
                         node.sum = key_add(&child.sum, &node.key);
                         node.size = child.size + 1;
                     } else {
@@ -69,6 +70,7 @@ impl<
                     nodes[j] = Some(node);
 
                     children = tree.children(child);
+                    prev = node_ptr;
                     i += 1;
                 }
                 let mut itr = nodes.iter_mut().filter_map(|x| x.take());
@@ -373,7 +375,11 @@ struct IndexedTree<T> {
 
 impl<T> traits::Tree<usize> for IndexedTree<T> {
     fn root(&self) -> Option<usize> {
-        Some(0)
+        if self.nodes.is_empty() {
+            None
+        } else {
+            Some(0)
+        }
     }
 
     fn children(&self, n: usize) -> impl Iterator<Item = usize> {
@@ -408,13 +414,21 @@ mod test {
 
     #[allow(unused_imports)]
     use super::*;
-    use std::fmt::Write;
+    use std::io::Write;
 
     #[test]
     fn link_cut_tree_build() {
         let tree = IndexedTree {
             nodes: vec![0, 1, 2, 3, 4, 5, 6, 7],
-            childs: vec![vec![1, 2], vec![3, 4], vec![5, 6]],
+            childs: vec![
+                vec![1],
+                vec![2],
+                vec![3],
+                vec![4],
+                vec![5],
+                vec![6],
+                vec![7],
+            ],
         };
         let lct = LinkCutTree::new(
             &tree,
@@ -423,8 +437,12 @@ mod test {
             |x, y| *x += *y,
             |_| {},
         );
-        for root in lct.root {
-            root.tree().display_manual(|s, n| write!(s, "{}", n.sum));
+        for (_, root) in lct.root.iter().copied().enumerate() {
+            if let Some(p) = root.as_ref().parent {
+                println!("parent: {}", p.as_ref().key);
+            }
+            root.tree()
+                .display_manual(|s, n| write!(s, "{},{}", n.key, n.sum));
         }
     }
 }

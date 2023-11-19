@@ -2,7 +2,11 @@
 pub mod link_cut_tree;
 
 use std::{
+    collections::HashSet,
+    convert::Infallible,
     fmt::{self, Debug, Display},
+    io::Stdout,
+    process::Stdio,
     ptr::NonNull,
 };
 
@@ -49,7 +53,6 @@ struct Node<K, Op> {
     rev: bool,
 }
 
-#[derive(Eq)]
 pub struct NodePtr<K, Op>(NonNull<Node<K, Op>>);
 
 impl<K, Op> PartialEq for NodePtr<K, Op> {
@@ -57,6 +60,7 @@ impl<K, Op> PartialEq for NodePtr<K, Op> {
         self.0 == other.0
     }
 }
+impl<K, Op> Eq for NodePtr<K, Op> {}
 
 impl<K, Op> Clone for NodePtr<K, Op> {
     fn clone(&self) -> Self {
@@ -65,6 +69,12 @@ impl<K, Op> Clone for NodePtr<K, Op> {
 }
 
 impl<K, Op> Copy for NodePtr<K, Op> {}
+
+impl<K, Op> std::hash::Hash for NodePtr<K, Op> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state)
+    }
+}
 
 impl<K, Op> Tree<K, Op> {
     const fn new() -> Self {
@@ -146,6 +156,27 @@ impl<K, Op> Tree<K, Op> {
         }
     }
 
+    fn dfs(&self, mut f: impl FnMut(&Node<K, Op>)) {
+        if let Some(root) = self.option() {
+            let mut stack: Vec<NodePtr<K, Op>> = vec![root];
+            let mut visited = HashSet::from([root]);
+            while let Some(n_ptr) = stack.pop() {
+                let n = n_ptr.as_ref();
+                f(n);
+                if let Some(right) = n.child(Direction::Right) {
+                    if visited.insert(right) {
+                        stack.push(right);
+                    }
+                }
+                if let Some(left) = n.child(Direction::Left) {
+                    if visited.insert(left) {
+                        stack.push(left);
+                    }
+                }
+            }
+        }
+    }
+
     fn fmt_rec(&self, f: &mut fmt::Formatter, level: usize) -> fmt::Result
     where
         K: Display,
@@ -179,12 +210,12 @@ impl<K, Op> Tree<K, Op> {
         }
     }
 
-    fn display_manual_rec<W: fmt::Write>(
+    fn display_manual_rec<W: std::io::Write>(
         &self,
         f: &mut W,
         level: usize,
-        disp: &mut impl FnMut(&mut W, &Node<K, Op>) -> fmt::Result,
-    ) -> fmt::Result {
+        disp: &mut impl FnMut(&mut W, &Node<K, Op>) -> std::io::Result<()>,
+    ) -> std::io::Result<()> {
         if let Some(s) = self.option() {
             Self::from_option(s.as_ref().left).display_manual_rec(f, level + 1, disp)?;
             write!(f, "{}", "\t".repeat(level))?;
@@ -196,10 +227,12 @@ impl<K, Op> Tree<K, Op> {
     }
 
     // Stringを使っているが、他にいい方法がありそう
-    fn display_manual(&self, mut disp: impl FnMut(&mut String, &Node<K, Op>) -> fmt::Result) {
-        let mut s = String::new();
+    fn display_manual(
+        &self,
+        mut disp: impl FnMut(&mut Stdout, &Node<K, Op>) -> std::io::Result<()>,
+    ) {
+        let mut s = std::io::stdout();
         self.display_manual_rec(&mut s, 0, &mut disp).unwrap();
-        print!("{}", s);
     }
 }
 
