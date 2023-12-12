@@ -178,7 +178,7 @@ mod algorithm {
 
     use super::AdjacencyList;
 
-    pub fn max_flow<W: num_traits::Unsigned + Copy>(graph: &AdjacencyList<W>, s: usize, t: usize) {
+    pub fn max_flow<W: num_traits::Unsigned + Copy>(graph: AdjacencyList<W>, s: usize, t: usize) {
         let mut visited = vec![false; graph.vertices];
         let mut label = vec![0u32; graph.vertices];
         let mut queue = VecDeque::from([s]);
@@ -195,10 +195,11 @@ mod algorithm {
             }));
         }
 
-        let mut current_edge = graph.edges[..t]
+        let mut current_edge: Vec<Option<usize>> = graph.edges[..t]
             .iter()
             .map(|v| v.get(0).map(|(to, _)| *to))
-            .chain(graph.edges[(t + 1)..].iter().map(|v| v.get(0).map(|(to, _)| *to)));
+            .chain(std::iter::once(None))
+            .chain(graph.edges[(t + 1)..].iter().map(|v| v.get(0).map(|(to, _)| *to))).collect();
 
         unimplemented!()
     }
